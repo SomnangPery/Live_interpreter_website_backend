@@ -14,7 +14,7 @@ export const config = {
   geminiWebsocketBase: 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent',
   firebaseProjectId: process.env.FIREBASE_PROJECT_ID || 'live-interpreter-1b68b',
   firebaseServiceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '',
-  firebaseWebApiKey: process.env.FIREBASE_WEB_API_KEY || 'AIzaSyAZnVJRbGKvuxoD4SfCMK-Xq6R9G9bejDA',
+  firebaseWebApiKey: process.env.FIREBASE_WEB_API_KEY || '',
 };
 
 
