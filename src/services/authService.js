@@ -1,11 +1,71 @@
 import { auth, db } from '../config/firebase.js';
 import { config } from '../config/env.js';
+import { sendVerificationEmail, sendPasswordResetEmail } from './emailService.js';
 
 const USERS_COLLECTION = 'users';
 
+// In-memory stores for 6-digit verification codes and password reset codes
+const verificationStore = new Map();
+const passwordResetStore = new Map();
+
+/**
+ * Helper: Save 6-digit OTP password reset code in memory and Firestore
+ */
+async function savePasswordResetCode(email, code) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const now = Date.now();
+  const expiresAt = now + 15 * 60 * 1000; // 15 minutes validity
+  const record = {
+    email: normalizedEmail,
+    code,
+    createdAt: new Date(now).toISOString(),
+    expiresAt,
+  };
+
+  passwordResetStore.set(normalizedEmail, record);
+
+  try {
+    await db.collection('password_resets').doc(normalizedEmail).set(record);
+  } catch (err) {
+    console.warn(`[Firestore] password reset code save skipped/failed for ${normalizedEmail}:`, err.message);
+  }
+  return record;
+}
+
+/**
+ * Helper: Generate 6-digit OTP code string
+ */
+function generate6DigitCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+/**
+ * Helper: Save 6-digit OTP verification code in memory and Firestore
+ */
+async function saveVerificationCode(email, code) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const now = Date.now();
+  const expiresAt = now + 15 * 60 * 1000; // 15 minutes validity
+  const record = {
+    email: normalizedEmail,
+    code,
+    createdAt: new Date(now).toISOString(),
+    expiresAt,
+  };
+
+  verificationStore.set(normalizedEmail, record);
+
+  try {
+    await db.collection('email_verifications').doc(normalizedEmail).set(record);
+  } catch (err) {
+    console.warn(`[Firestore] verification code save skipped/failed for ${normalizedEmail}:`, err.message);
+  }
+  return record;
+}
+
 /**
  * Register a new user with email, password, and display name using Firebase Auth REST API.
- * Syncs user profile document to Firestore /users/{uid}.
+ * Syncs user profile document to Firestore /users/{uid} and sends 6-digit verification email.
  */
 export async function signUp({ email, password, displayName }) {
   if (!email || !password) {
@@ -70,6 +130,7 @@ export async function signUp({ email, password, displayName }) {
     email: trimmedEmail,
     displayName: trimmedName || '',
     photoURL: null,
+    emailVerified: false,
     createdAt: now,
     updatedAt: now,
   };
@@ -81,11 +142,22 @@ export async function signUp({ email, password, displayName }) {
     console.warn('Firestore write skipped or failed:', err.message);
   }
 
+  // 4. Generate 6-digit verification code and send email
+  const verificationCode = generate6DigitCode();
+  await saveVerificationCode(trimmedEmail, verificationCode);
+  try {
+    await sendVerificationEmail({ toEmail: trimmedEmail, code: verificationCode, displayName: trimmedName });
+  } catch (emailErr) {
+    console.warn('Sending verification email failed:', emailErr.message);
+  }
+
   return {
+    message: 'Registration successful. A 6-digit verification code has been sent to your email.',
     user: userProfile,
     idToken,
     refreshToken: data.refreshToken,
     expiresIn: data.expiresIn,
+    emailVerified: false,
   };
 }
 
@@ -133,38 +205,32 @@ export async function signIn({ email, password }) {
 }
 
 /**
- * Trigger Firebase Password Reset Email
+ * Trigger 6-digit OTP Password Reset Email
  */
 export async function sendPasswordReset(email) {
   if (!email || !email.trim()) {
     throw new Error('Email address is required.');
   }
 
-  const apiKey = config.firebaseWebApiKey;
-  if (!apiKey) {
-    throw new Error('Firebase Web API key is missing in server configuration.');
-  }
+  const normalizedEmail = email.trim().toLowerCase();
 
-  const response = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        requestType: 'PASSWORD_RESET',
-        email: email.trim(),
-      }),
+  let displayName = '';
+  try {
+    const usersSnapshot = await db.collection(USERS_COLLECTION).where('email', '==', normalizedEmail).get();
+    if (!usersSnapshot.empty) {
+      displayName = usersSnapshot.docs[0].data()?.displayName || '';
     }
-  );
+  } catch (_) {}
 
-  const data = await response.json();
+  const code = generate6DigitCode();
+  await savePasswordResetCode(normalizedEmail, code);
 
-  if (!response.ok) {
-    const errorMsg = data?.error?.message || 'Failed to send password reset email.';
-    throw new Error(mapFirebaseError(errorMsg));
-  }
+  await sendPasswordResetEmail({ toEmail: normalizedEmail, code, displayName });
 
-  return { success: true, message: 'Password reset email sent successfully.' };
+  return {
+    success: true,
+    message: `Password reset code sent to ${normalizedEmail}.`,
+  };
 }
 
 /**
@@ -268,3 +334,211 @@ function mapFirebaseError(code) {
       return code.replace(/_/g, ' ').toLowerCase();
   }
 }
+
+/**
+ * Verify 6-digit code for a user's email address
+ */
+export async function verifyEmailCode({ email, code }) {
+  if (!email || !code) {
+    throw new Error('Email address and 6-digit verification code are required.');
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const cleanCode = code.toString().trim();
+
+  let record = verificationStore.get(normalizedEmail);
+
+  if (!record) {
+    try {
+      const doc = await db.collection('email_verifications').doc(normalizedEmail).get();
+      if (doc.exists) {
+        record = doc.data();
+      }
+    } catch (_) {}
+  }
+
+  if (!record) {
+    throw new Error('No verification code found for this email. Please request a new code.');
+  }
+
+  if (Date.now() > record.expiresAt) {
+    verificationStore.delete(normalizedEmail);
+    throw new Error('Verification code has expired. Please request a new code.');
+  }
+
+  if (record.code !== cleanCode) {
+    throw new Error('Invalid verification code. Please check and try again.');
+  }
+
+  // Verification succeeded - clear verification record
+  verificationStore.delete(normalizedEmail);
+  try {
+    await db.collection('email_verifications').doc(normalizedEmail).delete();
+  } catch (_) {}
+
+  // Update user document emailVerified status
+  let updatedUser = null;
+  const now = new Date().toISOString();
+  try {
+    const usersSnapshot = await db.collection(USERS_COLLECTION).where('email', '==', normalizedEmail).get();
+    if (!usersSnapshot.empty) {
+      const userDoc = usersSnapshot.docs[0];
+      const uid = userDoc.id;
+      await db.collection(USERS_COLLECTION).doc(uid).set({
+        emailVerified: true,
+        verifiedAt: now,
+        updatedAt: now,
+      }, { merge: true });
+
+      try {
+        await auth.updateUser(uid, { emailVerified: true });
+      } catch (_) {}
+
+      const freshDoc = await db.collection(USERS_COLLECTION).doc(uid).get();
+      if (freshDoc.exists) updatedUser = freshDoc.data();
+    }
+  } catch (err) {
+    console.warn('Updating user profile verification status skipped/failed:', err.message);
+  }
+
+  return {
+    success: true,
+    message: 'Email address verified successfully.',
+    emailVerified: true,
+    user: updatedUser,
+  };
+}
+
+/**
+ * Resend a new 6-digit verification code to user's email
+ */
+export async function resendVerificationCode(email) {
+  if (!email || !email.trim()) {
+    throw new Error('Email address is required.');
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const code = generate6DigitCode();
+  await saveVerificationCode(normalizedEmail, code);
+
+  let displayName = '';
+  try {
+    const usersSnapshot = await db.collection(USERS_COLLECTION).where('email', '==', normalizedEmail).get();
+    if (!usersSnapshot.empty) {
+      displayName = usersSnapshot.docs[0].data()?.displayName || '';
+    }
+  } catch (_) {}
+
+  await sendVerificationEmail({ toEmail: normalizedEmail, code, displayName });
+
+  return {
+    success: true,
+    message: `Verification code resent to ${normalizedEmail}.`,
+  };
+}
+
+/**
+ * Verify 6-digit password reset code
+ */
+export async function verifyResetCode({ email, code }) {
+  if (!email || !code) {
+    throw new Error('Email address and 6-digit password reset code are required.');
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const cleanCode = code.toString().trim();
+
+  let record = passwordResetStore.get(normalizedEmail);
+
+  if (!record) {
+    try {
+      const doc = await db.collection('password_resets').doc(normalizedEmail).get();
+      if (doc.exists) {
+        record = doc.data();
+      }
+    } catch (_) {}
+  }
+
+  if (!record) {
+    throw new Error('No password reset request found for this email address. Please request a new code.');
+  }
+
+  if (Date.now() > record.expiresAt) {
+    passwordResetStore.delete(normalizedEmail);
+    throw new Error('Password reset code has expired. Please request a new code.');
+  }
+
+  if (record.code !== cleanCode) {
+    throw new Error('Invalid password reset code. Please check and try again.');
+  }
+
+  return {
+    valid: true,
+    message: 'Password reset code is valid.',
+  };
+}
+
+/**
+ * Reset user password with verified 6-digit reset code
+ */
+export async function confirmPasswordReset({ email, code, newPassword }) {
+  if (!email || !code || !newPassword) {
+    throw new Error('Email address, 6-digit reset code, and new password are required.');
+  }
+
+  if (newPassword.length < 6) {
+    throw new Error('New password must be at least 6 characters long.');
+  }
+
+  // 1. Verify code validity
+  await verifyResetCode({ email, code });
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // 2. Find user UID
+  let uid = null;
+  try {
+    const usersSnapshot = await db.collection(USERS_COLLECTION).where('email', '==', normalizedEmail).get();
+    if (!usersSnapshot.empty) {
+      uid = usersSnapshot.docs[0].id;
+    }
+  } catch (_) {}
+
+  if (!uid) {
+    try {
+      const userRecord = await auth.getUserByEmail(normalizedEmail);
+      uid = userRecord.uid;
+    } catch (_) {}
+  }
+
+  if (!uid) {
+    throw new Error('No account found associated with this email address.');
+  }
+
+  // 3. Update password in Firebase Auth
+  try {
+    await auth.updateUser(uid, { password: newPassword });
+  } catch (err) {
+    console.warn('[Firebase Admin] updateUser password error:', err.message);
+    throw new Error(`Failed to update password: ${err.message}`);
+  }
+
+  // 4. Clean up password reset record
+  passwordResetStore.delete(normalizedEmail);
+  try {
+    await db.collection('password_resets').doc(normalizedEmail).delete();
+  } catch (_) {}
+
+  // 5. Update user document timestamp
+  const now = new Date().toISOString();
+  try {
+    await db.collection(USERS_COLLECTION).doc(uid).set({ updatedAt: now }, { merge: true });
+  } catch (_) {}
+
+  return {
+    success: true,
+    message: 'Your password has been reset successfully. You can now log in with your new password.',
+  };
+}
+
+

@@ -216,4 +216,166 @@ router.post('/auth/verify', verifyFirebaseToken, (req, res) => {
   });
 });
 
+/**
+ * @openapi
+ * /api/auth/verify-email:
+ *   post:
+ *     summary: Verify user email address using 6-digit code
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - code
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 description: User's registered email address
+ *               code:
+ *                 type: string
+ *                 description: 6-digit numeric verification code
+ *     responses:
+ *       200:
+ *         description: Email verified successfully
+ *       400:
+ *         description: Invalid or expired verification code
+ */
+router.post('/auth/verify-email', async (req, res) => {
+  try {
+    const { email, code } = req.body || {};
+    if (!email || !code) {
+      return res.status(400).json({ error: 'Email address and 6-digit verification code are required.' });
+    }
+    const result = await authService.verifyEmailCode({ email, code });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * @openapi
+ * /api/auth/resend-verification:
+ *   post:
+ *     summary: Resend 6-digit email verification code
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: New verification code sent to email
+ *       400:
+ *         description: Error processing request
+ */
+router.post('/auth/resend-verification', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) {
+      return res.status(400).json({ error: 'Email address is required.' });
+    }
+    const result = await authService.resendVerificationCode(email);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * @openapi
+ * /api/auth/verify-reset-code:
+ *   post:
+ *     summary: Verify 6-digit password reset code
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - code
+ *             properties:
+ *               email:
+ *                 type: string
+ *               code:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Reset code valid
+ *       400:
+ *         description: Invalid or expired reset code
+ */
+router.post('/auth/verify-reset-code', async (req, res) => {
+  try {
+    const { email, code } = req.body || {};
+    if (!email || !code) {
+      return res.status(400).json({ error: 'Email address and 6-digit reset code are required.' });
+    }
+    const result = await authService.verifyResetCode({ email, code });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * @openapi
+ * /api/auth/reset-password:
+ *   post:
+ *     summary: Reset password using verified 6-digit code
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - code
+ *               - newPassword
+ *             properties:
+ *               email:
+ *                 type: string
+ *               code:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password reset successful
+ *       400:
+ *         description: Invalid request or expired code
+ */
+router.post('/auth/reset-password', async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body || {};
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: 'Email address, 6-digit reset code, and new password are required.' });
+    }
+    const result = await authService.confirmPasswordReset({ email, code, newPassword });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 export default router;

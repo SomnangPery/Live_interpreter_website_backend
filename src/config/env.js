@@ -15,6 +15,12 @@ export const config = {
   firebaseProjectId: process.env.FIREBASE_PROJECT_ID || 'live-interpreter-1b68b',
   firebaseServiceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '',
   firebaseWebApiKey: process.env.FIREBASE_WEB_API_KEY || '',
+  smtpHost: process.env.SMTP_HOST || '',
+  smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
+  smtpSecure: process.env.SMTP_SECURE === 'true',
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPass: process.env.SMTP_PASS || '',
+  smtpFrom: process.env.SMTP_FROM || '"Live Interpreter" <no-reply@liveinterpreter.com>',
 };
 
 
