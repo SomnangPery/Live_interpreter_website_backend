@@ -4,9 +4,10 @@ import { sendVerificationEmail, sendPasswordResetEmail } from './emailService.js
 
 const USERS_COLLECTION = 'users';
 
-// In-memory stores for 6-digit verification codes and password reset codes
+// In-memory stores for 6-digit verification codes, password reset codes, and dev fallback users
 const verificationStore = new Map();
 const passwordResetStore = new Map();
+export const devUsersStore = new Map();
 
 /**
  * Helper: Save 6-digit OTP password reset code in memory and Firestore
@@ -77,7 +78,29 @@ export async function signUp({ email, password, displayName }) {
   const apiKey = config.firebaseWebApiKey;
 
   if (!apiKey) {
-    throw new Error('Firebase Web API key is missing in server configuration.');
+    console.log(`[DevAuth] FIREBASE_WEB_API_KEY not configured. Registering "${trimmedEmail}" in local development store.`);
+    const uid = `dev-${Buffer.from(trimmedEmail).toString('hex').slice(0, 16)}`;
+    const now = new Date().toISOString();
+    const userProfile = {
+      uid,
+      email: trimmedEmail,
+      displayName: trimmedName || trimmedEmail.split('@')[0],
+      photoURL: null,
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    devUsersStore.set(trimmedEmail.toLowerCase(), { ...userProfile, password });
+    devUsersStore.set(uid, { ...userProfile, password });
+
+    return {
+      message: 'Registration successful! (Development Mode)',
+      user: userProfile,
+      idToken: `dev-token-${uid}`,
+      refreshToken: `dev-refresh-${uid}`,
+      expiresIn: '86400',
+      emailVerified: true,
+    };
   }
 
   // 1. Create User via Firebase Auth REST API
@@ -237,6 +260,14 @@ export async function sendPasswordReset(email) {
  * Get User Profile document from Firestore (safely wrapped)
  */
 export async function getUserProfile(uid) {
+  if (uid && uid.startsWith('dev-')) {
+    const user = devUsersStore.get(uid);
+    if (user) {
+      const { password, ...safeUser } = user;
+      return safeUser;
+    }
+  }
+
   try {
     const doc = await db.collection(USERS_COLLECTION).doc(uid).get();
     if (!doc.exists) return null;
@@ -254,6 +285,15 @@ export async function updateUserProfile(uid, { displayName, photoURL }) {
   const updates = {};
   if (displayName !== undefined) updates.displayName = displayName.trim();
   if (photoURL !== undefined) updates.photoURL = photoURL;
+
+  if (uid && uid.startsWith('dev-')) {
+    let user = devUsersStore.get(uid) || { uid, email: 'dev@example.com' };
+    user = { ...user, ...updates, updatedAt: new Date().toISOString() };
+    devUsersStore.set(uid, user);
+    if (user.email) devUsersStore.set(user.email.toLowerCase(), user);
+    const { password, ...safeUser } = user;
+    return safeUser;
+  }
 
   // 1. Update Firebase Auth record safely
   if (Object.keys(updates).length > 0) {
@@ -287,7 +327,37 @@ export async function updateUserProfile(uid, { displayName, photoURL }) {
 async function signInWithPassword(email, password) {
   const apiKey = config.firebaseWebApiKey;
   if (!apiKey) {
-    throw new Error('Firebase Web API key is missing in server configuration.');
+    console.log(`[DevAuth] FIREBASE_WEB_API_KEY not configured. Authenticating "${email}" via local development store.`);
+    const normalizedEmail = email.trim().toLowerCase();
+    let user = devUsersStore.get(normalizedEmail);
+
+    if (!user) {
+      const uid = `dev-${Buffer.from(normalizedEmail).toString('hex').slice(0, 16)}`;
+      const now = new Date().toISOString();
+      user = {
+        uid,
+        email: email.trim(),
+        displayName: email.trim().split('@')[0],
+        photoURL: null,
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+        password,
+      };
+      devUsersStore.set(normalizedEmail, user);
+      devUsersStore.set(uid, user);
+    } else if (user.password && user.password !== password) {
+      throw new Error('Incorrect password. Please try again.');
+    }
+
+    return {
+      localId: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      idToken: `dev-token-${user.uid}`,
+      refreshToken: `dev-refresh-${user.uid}`,
+      expiresIn: '86400',
+    };
   }
 
   const response = await fetch(
@@ -319,7 +389,8 @@ async function signInWithPassword(email, password) {
 function mapFirebaseError(code) {
   switch (code) {
     case 'EMAIL_NOT_FOUND':
-      return 'No account found with this email address.';
+    case 'INVALID_LOGIN_CREDENTIALS':
+      return 'Incorrect email or password. Please check and try again.';
     case 'INVALID_PASSWORD':
       return 'Incorrect password. Please try again.';
     case 'USER_DISABLED':

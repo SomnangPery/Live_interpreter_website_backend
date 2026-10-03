@@ -62,6 +62,7 @@ router.post('/transcribe', upload.single('file'), async (req, res) => {
 
     res.json({
       transcription,
+      text: transcription, // Frontend compatibility alias
       detectedLanguage: score.lang,
       tone,
     });

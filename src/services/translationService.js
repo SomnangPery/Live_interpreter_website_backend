@@ -4,14 +4,14 @@ import * as LanguageDetector from './languageDetector.js';
 const GOOGLE_TRANSLATE_BASE_URL = 'https://translate.googleapis.com/translate_a/single';
 
 /**
- * Translate text with Gemini REST API (gemini-2.5-flash)
+ * Translate text with Gemini REST API (gemini-3.6-flash)
  */
 export async function translateWithGemini({ text, sourceLang, targetLang }) {
   if (!text || !text.trim()) return null;
   const apiKey = config.geminiApiKey;
   if (!apiKey) return null;
 
-  const uri = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const uri = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
   const tgtName = targetLang === 'ja' ? 'Japanese' : 'English';
 
   const prompt = `
@@ -56,7 +56,7 @@ export async function translateBilingualWithGemini(text) {
   const apiKey = config.geminiApiKey;
   if (!apiKey) return null;
 
-  const uri = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const uri = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
 
   const prompt = `
 You are an expert bilingual classifier and simultaneous interpreter for English and Japanese.

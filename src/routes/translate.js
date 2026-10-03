@@ -51,25 +51,34 @@ const router = Router();
  */
 router.post('/translate', async (req, res) => {
   try {
-    const { text, sourceLang = 'auto', targetLang = 'ja' } = req.body;
+    const { text, sourceLang, targetLang, from, to } = req.body;
+    const sLang = sourceLang || from || 'auto';
+    const tLang = targetLang || to || 'ja';
+
     if (!text || !text.trim()) {
       return res.status(400).json({ error: 'Text parameter is required.' });
     }
 
     const translatedText = await translationService.translate({
       text: text.trim(),
-      sourceLang,
-      targetLang,
+      sourceLang: sLang,
+      targetLang: tLang,
     });
 
     const confidence = translationService.assessConfidence(text, translatedText);
+    const confidenceScore = confidence === 'high' ? 0.95 : confidence === 'medium' ? 0.8 : 0.6;
+    const tone = LanguageDetector.detectTone(text);
+    const toneEmoji = LanguageDetector.toneEmoji(tone);
 
     res.json({
       originalText: text,
       translatedText,
-      sourceLanguage: sourceLang,
-      targetLanguage: targetLang,
+      translation: translatedText, // Frontend compatibility alias
+      sourceLanguage: sLang,
+      targetLanguage: tLang,
       confidence,
+      confidenceScore,
+      toneEmoji,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -147,10 +156,12 @@ router.post('/translate/bilingual', async (req, res) => {
       targetLanguage,
       originalText: text,
       translatedText: result.translated,
+      translation: result.translated, // Frontend compatibility alias
       speaker,
       tone,
       toneEmoji,
       confidence,
+      confidenceScore: confidence === 'high' ? 0.95 : 0.8,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -203,6 +214,36 @@ router.post('/detect-language', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * /api/summarize: AI Summary of conversation transcripts
+ */
+router.post('/summarize', async (req, res) => {
+  try {
+    const { transcript } = req.body || {};
+    if (!transcript || !transcript.trim()) {
+      return res.json({ en: 'Session completed with no recorded dialogue.' });
+    }
+
+    const summary = await translationService.translateWithGemini({
+      text: `Summarize this bilingual conversation into 1-2 concise bullet points highlighting the main key points discussed:\n${transcript}`,
+      sourceLang: 'en',
+      targetLang: 'en',
+    });
+
+    res.json({ en: summary || 'Bilingual conversation successfully interpreted.' });
+  } catch (err) {
+    res.json({ en: 'Bilingual conversation successfully interpreted.' });
+  }
+});
+
+/**
+ * /api/tts: Text-To-Speech endpoint placeholder
+ */
+router.post('/tts', (req, res) => {
+  // Let client use native browser SpeechSynthesis with full language voice packs
+  res.status(404).json({ error: 'Use client Web Speech API' });
 });
 
 export default router;

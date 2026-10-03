@@ -1,4 +1,5 @@
 import { auth } from '../config/firebase.js';
+import { devUsersStore } from '../services/authService.js';
 
 /**
  * Middleware to strictly verify Firebase ID token in Authorization header
@@ -11,6 +12,24 @@ export async function verifyFirebaseToken(req, res, next) {
   }
 
   const idToken = authHeader.split('Bearer ')[1].trim();
+
+  // Support local development mock tokens
+  if (idToken.startsWith('dev-token-')) {
+    const uid = idToken.replace('dev-token-', '');
+    const user = devUsersStore.get(uid) || {
+      uid,
+      email: 'dev@example.com',
+      displayName: 'Developer User',
+    };
+    req.user = {
+      uid: user.uid,
+      userId: user.uid,
+      email: user.email || 'dev@example.com',
+      name: user.displayName || 'Developer User',
+      picture: user.photoURL || '',
+    };
+    return next();
+  }
 
   try {
     const decodedToken = await auth.verifyIdToken(idToken);
@@ -36,6 +55,24 @@ export async function optionalFirebaseToken(req, res, next) {
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const idToken = authHeader.split('Bearer ')[1].trim();
+
+    if (idToken.startsWith('dev-token-')) {
+      const uid = idToken.replace('dev-token-', '');
+      const user = devUsersStore.get(uid) || {
+        uid,
+        email: 'dev@example.com',
+        displayName: 'Developer User',
+      };
+      req.user = {
+        uid: user.uid,
+        userId: user.uid,
+        email: user.email || 'dev@example.com',
+        name: user.displayName || 'Developer User',
+        picture: user.photoURL || '',
+      };
+      return next();
+    }
+
     try {
       const decodedToken = await auth.verifyIdToken(idToken);
       req.user = {

@@ -42,12 +42,18 @@ app.use(express.urlencoded({ extended: true }));
 // Setup Swagger Documentation UI
 setupSwagger(app);
 
-// Routes
+// Routes (support both /api prefix and direct paths to avoid 404s)
 app.use('/api', healthRouter);
 app.use('/api', authRouter);
 app.use('/api', translateRouter);
 app.use('/api', transcribeRouter);
 app.use('/api', conversationsRouter);
+
+app.use('/', healthRouter);
+app.use('/', authRouter);
+app.use('/', translateRouter);
+app.use('/', transcribeRouter);
+app.use('/', conversationsRouter);
 
 // Root Endpoint
 app.get('/', (req, res) => {
@@ -62,9 +68,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start Server
-server.listen(config.port, () => {
-  console.log(`Server is running on http://localhost:${config.port}`);
+// Start Server (bind to 0.0.0.0 for Render, Railway, and cloud containers)
+const HOST = '0.0.0.0';
+server.listen(config.port, HOST, () => {
+  console.log(`Server is running on http://${HOST}:${config.port}`);
   console.log(`Swagger documentation: http://localhost:${config.port}/api-docs`);
   console.log(`Live Interpreter WebSocket: ws://localhost:${config.port}/ws/live-interpreter`);
 });
