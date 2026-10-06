@@ -14,6 +14,7 @@ export const config = {
   geminiWebsocketBase: 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent',
   firebaseProjectId: process.env.FIREBASE_PROJECT_ID || 'live-interpreter-1b68b',
   firebaseServiceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '',
+  firebaseServiceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
   firebaseWebApiKey: process.env.FIREBASE_WEB_API_KEY || '',
   smtpHost: process.env.SMTP_HOST || '',
   smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
