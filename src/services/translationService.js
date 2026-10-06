@@ -122,7 +122,7 @@ export async function translateGoogleFallback({ text, sourceLang = 'auto', targe
   url.searchParams.append('q', text);
 
   try {
-    const response = await fetch(url.toString());
+    const response = await fetch(url.toString(), { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } });
     if (!response.ok) {
       throw new Error(`Google Translate API returned ${response.status}`);
     }
