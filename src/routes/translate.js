@@ -151,7 +151,11 @@ router.post('/translate/bilingual', async (req, res) => {
     const toneEmoji = LanguageDetector.toneEmoji(tone);
     const confidence = translationService.assessConfidence(text, result.translated);
 
+    const meta = LanguageDetector.getLanguageMeta(spokenLanguage);
+
     res.json({
+      language: meta.language,
+      languageName: meta.languageName,
       spokenLanguage,
       targetLanguage,
       originalText: text,

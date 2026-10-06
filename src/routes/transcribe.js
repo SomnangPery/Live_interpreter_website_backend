@@ -57,13 +57,18 @@ router.post('/transcribe', upload.single('file'), async (req, res) => {
       requestedLang
     );
 
-    const score = await LanguageDetector.scoreEnJa(transcription);
+    const detected = await LanguageDetector.identifySpeechLanguage(transcription);
     const tone = LanguageDetector.detectTone(transcription);
 
     res.json({
+      type: 'speech_result',
       transcription,
       text: transcription, // Frontend compatibility alias
-      detectedLanguage: score.lang,
+      language: detected.language,
+      languageName: detected.languageName,
+      detectedLanguage: detected.language === 'ja-JP' ? 'ja' : 'en',
+      isFinal: true,
+      confidence: detected.confidence || 0.95,
       tone,
     });
   } catch (err) {

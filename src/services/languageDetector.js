@@ -7,11 +7,19 @@ import { config } from '../config/env.js';
  */
 
 const hiraganaRe = /[\u3040-\u309F]/;
-const katakanaRe = /[\u30A0-\u30FF]/;
+const katakanaRe = /[\u30A0-\u30FF\uFF65-\uFF9F]/;
 const kanjiRe = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
-const japaneseRe = /[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
+const japaneseRe = /[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF65-\uFF9F]/;
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const romajiJaWords = new Set([
+  'konnichiwa', 'arigatou', 'arigato', 'ohayou', 'ohayo', 'konbanwa',
+  'sumimasen', 'gomen', 'gomenasai', 'hai', 'iie', 'sayonara', 'otsukare',
+  'itadakimasu', 'gochisosama', 'onegai', 'shimasu', 'daijoubu', 'sugoi',
+  'kawaii', 'wakarimashita', 'naruhodo', 'moshi', 'anata', 'watashi',
+  'nihongo', 'nihon', 'tokyo'
+]);
+
+const GEMINI_MODEL = 'gemini-3.6-flash';
 
 async function detectLangViaGemini(text) {
   const apiKey = config.geminiApiKey || process.env.GEMINI_API_KEY;
@@ -149,4 +157,100 @@ export function speakerTurnLabel(speaker, spokenLang) {
   const flag = spokenLang === 'ja' ? '🇯🇵' : '🇺🇸';
   const langName = spokenLang === 'ja' ? '日本語' : 'English';
   return `Speaker ${speaker} · ${flag} ${langName}`;
+}
+
+/**
+ * Standardize language codes and metadata
+ * @param {string} langCode - 'en', 'ja', 'en-US', 'ja-JP'
+ */
+export function getLanguageMeta(langCode) {
+  const norm = normalizeLang(langCode);
+  if (norm === 'ja') {
+    return {
+      language: 'ja-JP',
+      languageName: 'Japanese',
+      sourceLang: 'ja',
+      targetLanguage: 'en-US',
+      targetLanguageName: 'English',
+      targetLang: 'en',
+    };
+  }
+  return {
+    language: 'en-US',
+    languageName: 'English',
+    sourceLang: 'en',
+    targetLanguage: 'ja-JP',
+    targetLanguageName: 'Japanese',
+    targetLang: 'ja',
+  };
+}
+
+/**
+ * Identify speech language between en-US and ja-JP
+ * Designed for real-time speech streams with noise hysteresis.
+ * @param {string} text - Transcribed speech string
+ * @param {string} [lastConfidentLang='en-US'] - Previous active session language
+ */
+export async function identifySpeechLanguage(text, lastConfidentLang = 'en-US') {
+  const trimmed = (text || '').trim();
+  const fallback = lastConfidentLang?.startsWith('ja') ? 'ja-JP' : 'en-US';
+
+  if (!trimmed) {
+    const meta = getLanguageMeta(fallback);
+    return {
+      language: meta.language,
+      languageName: meta.languageName,
+      confidence: 0.9,
+    };
+  }
+
+  // 1. Direct Japanese Unicode script: 100% Japanese
+  if (containsJapanese(trimmed)) {
+    return {
+      language: 'ja-JP',
+      languageName: 'Japanese',
+      confidence: 0.98,
+    };
+  }
+
+  // 2. Check for common Romaji words
+  const words = trimmed.toLowerCase().split(/[\s,.'!?-]+/).filter(Boolean);
+  const containsRomaji = words.some((w) => romajiJaWords.has(w));
+  if (containsRomaji && words.length <= 4) {
+    return {
+      language: 'ja-JP',
+      languageName: 'Japanese',
+      confidence: 0.92,
+    };
+  }
+
+  // 3. For Latin text, if very short token (1-2 chars, noise, filler like "uh", "ah"), preserve session language to prevent noise flipping
+  if (words.length <= 1 && trimmed.length <= 2) {
+    const meta = getLanguageMeta(fallback);
+    return {
+      language: meta.language,
+      languageName: meta.languageName,
+      confidence: 0.75,
+    };
+  }
+
+  // 4. Score with Gemini / heuristics
+  try {
+    const score = await scoreEnJa(trimmed, fallback.startsWith('ja') ? 'ja' : 'en');
+    if (score.lang === 'ja') {
+      return {
+        language: 'ja-JP',
+        languageName: 'Japanese',
+        confidence: score.confident ? 0.95 : 0.85,
+      };
+    }
+  } catch (err) {
+    console.warn('identifySpeechLanguage error fallback:', err.message);
+  }
+
+  return {
+    language: 'en-US',
+    languageName: 'English',
+    confidence: 0.95,
+  };
 }
