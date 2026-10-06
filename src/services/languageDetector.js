@@ -21,9 +21,23 @@ const romajiJaWords = new Set([
 
 const GEMINI_MODEL = 'gemini-3.6-flash';
 
+async function detectLangFallback(text) {
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && typeof data[2] === 'string') {
+        return data[2].toLowerCase().startsWith('ja') ? 'ja' : 'en';
+      }
+    }
+  } catch (_) {}
+  return 'en';
+}
+
 async function detectLangViaGemini(text) {
   const apiKey = config.geminiApiKey || process.env.GEMINI_API_KEY;
-  if (!apiKey) return 'en';
+  if (!apiKey) return detectLangFallback(text);
 
   try {
     const response = await fetch(
@@ -42,13 +56,12 @@ async function detectLangViaGemini(text) {
       }
     );
 
-    if (!response.ok) return 'en';
+    if (!response.ok) return detectLangFallback(text);
     const data = await response.json();
     const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toLowerCase() || '';
-    return raw.includes('ja') ? 'ja' : 'en';
+    return raw.includes('ja') ? 'ja' : (raw.includes('en') ? 'en' : detectLangFallback(text));
   } catch (err) {
-    console.error('Gemini language detection API error:', err);
-    return 'en';
+    return detectLangFallback(text);
   }
 }
 
@@ -96,12 +109,18 @@ export async function scoreEnJa(text, lastConfidentLang = null) {
     return { lang: 'ja', confident: true };
   }
 
-  // Ambiguous latin-script text (English, or romanized Japanese) — ask Gemini
+  // Check for common Romaji words (Japanese phonetics written in Latin script)
+  const words = trimmed.toLowerCase().split(/[\s,.'!?-]+/).filter(Boolean);
+  if (words.some((w) => romajiJaWords.has(w)) && words.length <= 4) {
+    return { lang: 'ja', confident: true };
+  }
+
+  // Ambiguous latin-script text (English, or romanized Japanese) — ask Gemini with GTx fallback
   try {
     const lang = await detectLangViaGemini(trimmed);
     return { lang, confident: true };
   } catch (err) {
-    console.error('Gemini language detection failed:', err);
+    console.error('Language detection failed:', err);
     return { lang: lastConfidentLang || 'en', confident: false };
   }
 }
