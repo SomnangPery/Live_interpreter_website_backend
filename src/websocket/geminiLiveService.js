@@ -1,3 +1,20 @@
+
+function cleanTranslationText(raw, targetLang = 'ja') {
+  if (!raw) return '';
+  let text = raw.trim();
+  text = text.replace(/\*\*.*?\*\*/gs, '').trim();
+  text = text.replace(/<[^>]*>/g, '').trim();
+  text = text.split('\n').map(l => l.trim()).filter(l => {
+    const low = l.toLowerCase();
+    return !low.startsWith("i've") && !low.startsWith("i am") && !low.startsWith("translating") && !low.startsWith("now translating") && !low.includes("accurately transcribed") && !low.includes("focusing on");
+  }).join(' ').trim();
+  if (targetLang === 'ja' || targetLang === 'ja-JP') {
+    const jaMatch = text.match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff].*$/s);
+    if (jaMatch) return jaMatch[0].trim();
+  }
+  return text.trim();
+}
+
 import WebSocket from 'ws';
 import { config } from '../config/env.js';
 import * as LanguageDetector from '../services/languageDetector.js';
@@ -196,6 +213,7 @@ export function handleLiveClientSocket(clientSocket) {
 
         if (sc.modelTurn && sc.modelTurn.parts) {
           for (const part of sc.modelTurn.parts) {
+            if (part.thought) continue; // Skip all AI internal thinking
             if (part.text && part.text.trim()) {
               session.currentTurnTranslation += part.text;
               clientSocket.send(JSON.stringify({
@@ -216,10 +234,25 @@ export function handleLiveClientSocket(clientSocket) {
 
         // 4. Turn complete: finalize sentence translation and direction
         if (sc.turnComplete) {
-          let finalTranslation = session.currentTurnTranslation.trim();
-
-          // Fallback if Gemini Live didn't emit text translation chunk
-          if (!finalTranslation && session.currentTurnFinalText) {
+          let finalTranslation = '';
+          // Always translate the detected speech directly to guarantee pure translation with zero AI agent monologue
+          if (session.currentTurnFinalText) {
+            try {
+              const src = session.currentLanguage === 'ja-JP' ? 'ja' : 'en';
+              const tgt = session.currentLanguage === 'ja-JP' ? 'en' : 'ja';
+              finalTranslation = await translationService.translate({
+                text: session.currentTurnFinalText,
+                sourceLang: src,
+                targetLang: tgt,
+              }) || '';
+            } catch (err) {
+              console.error('Translation error on turnComplete:', err.message);
+            }
+          }
+          if (!finalTranslation) {
+            finalTranslation = cleanTranslationText(session.currentTurnTranslation.trim(), session.currentLanguage === 'en-US' ? 'ja' : 'en');
+          }
+          if (false) {
             try {
               const src = session.currentLanguage === 'ja-JP' ? 'ja' : 'en';
               const tgt = session.currentLanguage === 'ja-JP' ? 'en' : 'ja';
